@@ -1,0 +1,52 @@
+name: Mock ticket availability check
+
+on:
+  workflow_dispatch:
+    inputs:
+      product_id:
+        description: Demo product identifier
+        required: true
+        default: DEMO-PRODUCT
+      schedule_id:
+        description: Demo schedule identifier
+        required: true
+        default: DEMO-SCHEDULE
+      seat_id:
+        description: Demo section identifier
+        required: true
+        default: F3
+      mock_available:
+        description: Simulated availability result
+        type: choice
+        options:
+          - available
+          - unavailable
+        default: available
+
+jobs:
+  mock-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate local mock response
+        env:
+          PRODUCT_ID: ${{ inputs.product_id }}
+          SCHEDULE_ID: ${{ inputs.schedule_id }}
+          SEAT_ID: ${{ inputs.seat_id }}
+          MOCK_AVAILABLE: ${{ inputs.mock_available }}
+        run: |
+          node <<'NODE'
+          const response = {
+            source: 'local-mock',
+            productId: process.env.PRODUCT_ID,
+            scheduleId: process.env.SCHEDULE_ID,
+            seatId: process.env.SEAT_ID,
+            chkResult: process.env.MOCK_AVAILABLE === 'available',
+          };
+
+          console.log(JSON.stringify(response, null, 2));
+          if (response.chkResult) {
+            console.log(`::notice title=Mock ticket alert::${response.seatId} is available in simulated data.`);
+          } else {
+            console.log(`::notice title=Mock ticket status::${response.seatId} is unavailable in simulated data.`);
+          }
+          NODE
