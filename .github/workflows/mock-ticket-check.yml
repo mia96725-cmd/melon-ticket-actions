@@ -27,7 +27,10 @@ jobs:
   mock-check:
     runs-on: ubuntu-latest
     steps:
-      - name: Evaluate local mock response
+      - name: Check out this fork
+        uses: actions/checkout@v4
+
+      - name: Test the local adapter and availability transition
         env:
           PRODUCT_ID: ${{ inputs.product_id }}
           SCHEDULE_ID: ${{ inputs.schedule_id }}
@@ -35,18 +38,49 @@ jobs:
           MOCK_AVAILABLE: ${{ inputs.mock_available }}
         run: |
           node <<'NODE'
-          const response = {
-            source: 'local-mock',
-            productId: process.env.PRODUCT_ID,
-            scheduleId: process.env.SCHEDULE_ID,
-            seatId: process.env.SEAT_ID,
-            chkResult: process.env.MOCK_AVAILABLE === 'available',
-          };
+          const assert = require('node:assert/strict');
+          const {
+            MockTicketAdapter,
+            findNewlyAvailable,
+            readAvailability,
+          } = require('./ticket-monitor-core.js');
 
-          console.log(JSON.stringify(response, null, 2));
-          if (response.chkResult) {
-            console.log(`::notice title=Mock ticket alert::${response.seatId} is available in simulated data.`);
-          } else {
-            console.log(`::notice title=Mock ticket status::${response.seatId} is unavailable in simulated data.`);
+          async function main() {
+            const previous = {
+              source: 'local-mock',
+              sections: { [process.env.SEAT_ID]: 'unavailable', T01: 'unknown' },
+            };
+            const state = process.env.MOCK_AVAILABLE === 'available' ? 'available' : 'unavailable';
+            const adapter = new MockTicketAdapter({ [process.env.SEAT_ID]: state, T01: 'available' });
+            const current = await readAvailability(adapter, {
+              productId: process.env.PRODUCT_ID,
+              scheduleId: process.env.SCHEDULE_ID,
+            });
+
+            assert.equal(current.source, 'local-mock');
+            assert.equal(current.sections[process.env.SEAT_ID], state);
+            assert.deepEqual(
+              findNewlyAvailable(previous, current).sort(),
+              (state === 'available' ? [process.env.SEAT_ID, 'T01'] : ['T01']).sort(),
+            );
+
+            const response = {
+              source: current.source,
+              productId: process.env.PRODUCT_ID,
+              scheduleId: process.env.SCHEDULE_ID,
+              seatId: process.env.SEAT_ID,
+              chkResult: current.sections[process.env.SEAT_ID] === 'available',
+            };
+            console.log(JSON.stringify(response, null, 2));
+            if (response.chkResult) {
+              console.log('::notice title=Mock ticket alert::' + response.seatId + ' is available in simulated data.');
+            } else {
+              console.log('::notice title=Mock ticket status::' + response.seatId + ' is unavailable in simulated data.');
+            }
           }
+
+          main().catch((error) => {
+            console.error(error);
+            process.exitCode = 1;
+          });
           NODE
